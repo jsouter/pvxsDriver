@@ -1,3 +1,5 @@
+#include <memory>
+
 #define PVAOverrunCounterString     "OVERRUN_COUNTER"
 #define PVAPvNameString             "PV_NAME"
 #define PVAPvConnectionStatusString "PV_CONNECTION"
@@ -8,7 +10,7 @@
 
 class pvxsDriver;
 
-typedef std::tr1::shared_ptr<pvxsDriver> pvxsDriverPtr;
+typedef std::shared_ptr<pvxsDriver> pvxsDriverPtr;
 
 class epicsShareClass pvxsDriver : public ADDriver
 {

@@ -50,7 +50,7 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
     : ADDriver(portName, 1, NUM_PVA_DRIVER_PARAMS, maxBuffers, maxMemory, 0, 0, ASYN_CANBLOCK, 1,
             priority, stackSize),
       m_pvName(pvName),
-      m_thisPtr(tr1::shared_ptr<pvxsDriver>(this))
+      m_thisPtr(shared_ptr<pvxsDriver>(this))
 {
     int status = asynSuccess;
     char versionString[20];
