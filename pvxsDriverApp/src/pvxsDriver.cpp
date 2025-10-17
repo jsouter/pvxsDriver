@@ -11,12 +11,7 @@
 #include <epicsThread.h>
 #include <iocsh.h>
 
-#include <pv/clientFactory.h>
-#include <pv/pvAccess.h>
-#include <pv/ntndarray.h>
-#include <pv/pvaVersion.h>
-
-#include <ntndArrayConverter.h>
+#include <ntndArrayConverterPvxs.h>
 
 #include <ADDriver.h>
 
@@ -27,9 +22,6 @@
 #define DEFAULT_REQUEST "field()"
 
 using namespace std;
-using namespace epics::pvData;
-using namespace epics::pvAccess;
-using namespace epics::nt;
 
 static const char *driverName = "pvxsDriver";
 
@@ -57,9 +49,7 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
 
     : ADDriver(portName, 1, NUM_PVA_DRIVER_PARAMS, maxBuffers, maxMemory, 0, 0, ASYN_CANBLOCK, 1,
             priority, stackSize),
-      m_pvName(pvName), m_request(DEFAULT_REQUEST),
-      m_priority(ChannelProvider::PRIORITY_DEFAULT),
-      m_channel(), m_pvRequest(CreateRequest::create()->createRequest(m_request)),
+      m_pvName(pvName),
       m_thisPtr(tr1::shared_ptr<pvxsDriver>(this))
 {
     int status = asynSuccess;
@@ -79,7 +69,7 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
     status |= setStringParam(NDDriverVersion, versionString);
     // We use the PvAccess version as the SDK version
     epicsSnprintf(versionString, sizeof(versionString), "%d.%d.%d", 
-                  EPICS_PVA_MAJOR_VERSION, EPICS_PVA_MINOR_VERSION, EPICS_PVA_MAINTENANCE_VERSION);
+                  PVXS_MAJOR_VERSION, PVXS_MINOR_VERSION, PVXS_MAINTENANCE_VERSION);
     status |= setStringParam(ADSDKVersion, versionString);
     status |= setStringParam(ADSerialNumber, "No serial number");
     status |= setStringParam(ADFirmwareVersion, "No firmware");
@@ -106,12 +96,6 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
                 "%s::%s unable to set driver parameters\n",
                 driverName, functionName);
 
-    ClientFactory::start();
-#if EPICS_PVA_MAJOR_VERSION >= 6
-        m_provider = ChannelProviderRegistry::clients()->getProvider("pva");
-#else
-        m_provider = getChannelProviderRegistry()->getProvider("pva");
-#endif
     connectPv(pvName);
 
     unlock();
@@ -119,241 +103,7 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
 
 asynStatus pvxsDriver::connectPv(std::string const & pvName)
 {
-    ChannelPtr channel;
-    MonitorPtr monitor;
-
-    static const char *functionName = "connectPv";
-    try
-    {
-        channel = m_provider->createChannel(pvName, m_thisPtr, m_priority);
-        monitor = channel->createMonitor(m_thisPtr, m_pvRequest);
-    }
-    catch (exception &ex)
-    {
-        asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
-                "%s::%s exception initializing monitor: %s\n",
-                driverName, functionName, ex.what());
-        return asynError;
-    }
-
-    m_pvName = pvName;
-    if(m_channel)
-        m_channel->destroy();
-    m_channel = channel;
-    m_monitor = monitor;
-
-    return asynSuccess;
-}
-
-string pvxsDriver::getRequesterName (void)
-{
-    return string(driverName);
-}
-
-void pvxsDriver::message (string const & message, MessageType messageType)
-{
-    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
-            "%s::%s: [type=%s] %s\n",
-            driverName, "message", getMessageTypeName(messageType).c_str(),
-            message.c_str());
-}
-
-void pvxsDriver::channelCreated (const Status& status,
-        ChannelPtr const & channel)
-{
-    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
-            "%s::%s: %s created\n",
-            driverName, "channelCreated", channel->getChannelName().c_str());
-}
-
-void pvxsDriver::channelStateChange (ChannelPtr const & channel,
-        Channel::ConnectionState state)
-{
-    const char *functionName = "channelStateChange";
-
-    lock();
-    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
-            "%s::%s %s: %s\n",
-            driverName, functionName, channel->getChannelName().c_str(),
-            Channel::ConnectionStateNames[state]);
-    setIntegerParam(PVAPvConnectionStatus, state == Channel::CONNECTED);
-    callParamCallbacks();
-    unlock();
-}
-
-void pvxsDriver::unlisten (MonitorPtr const & monitor)
-{
-    asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
-            "%s::%s monitor unlistens\n",
-            driverName, "unlisten");
-}
-
-void pvxsDriver::monitorConnect (Status const & status,
-        MonitorPtr const & monitor, StructureConstPtr const & structure)
-{
-    const char *functionName = "monitorConnect";
-
-    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
-            "%s::%s monitor connects [type=%s]\n",
-            driverName, functionName, Status::StatusTypeName[status.getType()]);
-
-    if (status.isSuccess())
-    {
-        PVDataCreatePtr PVDC = getPVDataCreate();
-
-        if(!NTNDArray::isCompatible(PVDC->createPVStructure(structure)))
-        {
-            asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
-                    "%s::%s incompatible PVStructure. Not starting monitor\n",
-                    driverName, functionName);
-            return;
-        }
-    }
-}
-
-void pvxsDriver::monitorEvent (MonitorPtr const & monitor)
-{
-    const char *functionName = "monitorEvent";
-    int acquire;
-
-    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
-            "%s::%s Event!\n",
-            driverName, functionName);
-    lock();
-    MonitorElementPtr update;
-    while ((update = monitor->poll()))
-    {
-        asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
-                 "%s::%s update!\n",
-                 driverName, functionName);
-        
-        if(!update->overrunBitSet->isEmpty())
-        {
-            int overrunCounter;
-            getIntegerParam(PVAOverrunCounter, &overrunCounter);
-            setIntegerParam(PVAOverrunCounter, overrunCounter + 1);
-            callParamCallbacks();
-        }
-        
-        getIntegerParam(ADAcquire, &acquire);
-        if (acquire == 0) {
-            monitor->release(update);
-            continue;
-        }
-
-        NTNDArrayPtr array(NTNDArray::wrap(update->pvStructurePtr));
-
-        if (!array) {
-            asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
-                    "%s::%s failed to wrap update in NTNDArray. Incorrect type?\n",
-                    driverName, functionName);
-            monitor->release(update);
-            continue;
-        }
-
-        NTNDArrayConverter converter(array);
-        NTNDArrayInfo_t info;
-
-        try
-        {
-            info = converter.getInfo();
-        }
-        catch(exception& e)
-        {
-            asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
-                    "%s::%s failed to get info from NTNDArray: %s\n",
-                    driverName, functionName, e.what());
-            monitor->release(update);
-            continue;
-        }
-
-        NDArray *pImage = pNDArrayPool->alloc(info.ndims, (size_t*) &info.dims,
-                info.dataType, info.totalBytes, NULL);
-
-        if(!pImage)
-        {
-            asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
-                    "%s::%s failed to alloc new NDArray"
-                    " - memory pool exhausted? (free: %d)\n",
-                    driverName, functionName, pNDArrayPool->getNumFree());
-            monitor->release(update);
-            continue;
-        }
-
-        unlock();
-        try
-        {
-            asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
-                      "%s::%s Converting to NDArray\n",
-                      driverName, functionName);
-            converter.toArray(pImage);
-        }
-        catch(exception& e)
-        {
-            asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
-                    "%s::%s failed to convert NTNDArray into NDArray: %s\n",
-                    driverName, functionName, e.what());
-            pImage->release();
-            monitor->release(update);
-            lock();
-            continue;
-        }
-        lock();
-
-        int xSize     = pImage->dims[info.x.dim].size;
-        int ySize     = pImage->dims[info.y.dim].size;
-        setIntegerParam(ADMaxSizeX,   xSize);
-        setIntegerParam(ADMaxSizeY,   ySize);
-        setIntegerParam(ADSizeX,      xSize);
-        setIntegerParam(ADSizeY,      ySize);
-        setIntegerParam(NDArraySizeX, xSize);
-        setIntegerParam(NDArraySizeY, ySize);
-        setIntegerParam(NDArraySizeZ, pImage->dims[info.color.dim].size);
-        setIntegerParam(ADMinX,       pImage->dims[info.x.dim].offset);
-        setIntegerParam(ADMinY,       pImage->dims[info.y.dim].offset);
-        setIntegerParam(ADBinX,       pImage->dims[info.x.dim].binning);
-        setIntegerParam(ADBinY,       pImage->dims[info.y.dim].binning);
-        setIntegerParam(ADReverseX,   pImage->dims[info.x.dim].reverse);
-        setIntegerParam(ADReverseY,   pImage->dims[info.y.dim].reverse);
-        setIntegerParam(NDArraySize,  (int) info.totalBytes);
-        setIntegerParam(NDDataType,   (int) info.dataType);
-        setIntegerParam(NDColorMode,  (int) info.colorMode);
-        callParamCallbacks();
-
-        int arrayCallbacks;
-        getIntegerParam(NDArrayCallbacks, &arrayCallbacks);
-        if(arrayCallbacks)
-        {
-            asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
-                      "%s::%s Callback with NDArray (%p)\n",
-                      driverName, functionName, pImage);
-            doCallbacksGenericPointer(pImage, NDArrayData, 0);
-        }
-
-        // Update the counters after doCallbacksGenericPointer()
-        int imageCounter;
-        int arrayCounter;
-        int imageMode;
-        int numImages;
-        getIntegerParam(NDArrayCounter, &arrayCounter);
-        setIntegerParam(NDArrayCounter, arrayCounter+1);
-        getIntegerParam(ADNumImagesCounter, &imageCounter);
-        imageCounter++;
-        setIntegerParam(ADNumImagesCounter, imageCounter);
-
-        // See if acquisition should stop
-        getIntegerParam(ADImageMode, &imageMode);
-        if (imageMode == ADImageMultiple) {
-            getIntegerParam(ADNumImages, &numImages);
-            if (imageCounter >= numImages) setIntegerParam(ADAcquire, 0);
-        }    
-        if (imageMode == ADImageSingle) setIntegerParam(ADAcquire, 0);
-        callParamCallbacks();
-
-        pImage->release();
-        monitor->release(update);
-    }
-    unlock();
+    return asynError;
 }
 
 /** Called when asyn clients call pasynInt32->write().
@@ -376,10 +126,12 @@ asynStatus pvxsDriver::writeInt32(asynUser *pasynUser, epicsInt32 value)
     if (function == ADAcquire){
         if (value == 1){
             setIntegerParam(ADNumImagesCounter, 0);
-            m_monitor->start();
+            return asynError;
+            // m_monitor->start();
         }
         else {
-            m_monitor->stop();
+            return asynError;
+            // m_monitor->stop();
         }
     } else {
         // If this parameter belongs to a base class call its method
@@ -445,7 +197,7 @@ asynStatus pvxsDriver::writeOctet(asynUser *pasynUser, const char *value, size_t
 
 void pvxsDriver::report (FILE *fp, int details)
 {
-    fprintf(fp, "PVAccess detector %s\n", this->portName);
+    fprintf(fp, "pvxs detector %s\n", this->portName);
     if (details > 0)
         fprintf(fp, " PV Name: %s\n", m_pvName.c_str());
 
