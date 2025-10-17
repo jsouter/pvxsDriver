@@ -1,4 +1,7 @@
 #include <memory>
+#include <pvxs/client.h>
+#include <pvxs/data.h>
+#include <ntndArrayConverterPvxs.h>
 
 #define PVAOverrunCounterString     "OVERRUN_COUNTER"
 #define PVAPvNameString             "PV_NAME"
@@ -35,6 +38,9 @@ private:
     std::string m_pvName;
     pvxsDriverPtr m_thisPtr;
     asynStatus connectPv(std::string const & pvName);
+    pvxs::client::Context m_ctxt;
+    pvxs::Value m_value;
+    NTNDArrayConverterPvxsPtr m_converter;
 };
 
 #define NUM_PVA_DRIVER_PARAMS ((int)(&LAST_PVA_DRIVER_PARAM - &FIRST_PVA_DRIVER_PARAM + 1))
