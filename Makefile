@@ -6,7 +6,7 @@ DIRS := $(DIRS) $(filter-out $(DIRS), $(wildcard *App))
 DIRS := $(DIRS) $(filter-out $(DIRS), $(wildcard *app))
 ifeq ($(BUILD_IOCS), YES)
 DIRS := $(DIRS) $(filter-out $(DIRS), $(wildcard iocs))
-iocs_DEPEND_DIRS += pvaDriverApp
+iocs_DEPEND_DIRS += pvxsDriverApp
 endif
 include $(TOP)/configure/RULES_TOP
 

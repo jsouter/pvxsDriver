@@ -1,7 +1,7 @@
 TOP = ..
 include $(TOP)/configure/CONFIG
 
-DIRS += pvaDriverIOC
+DIRS += pvxsDriverIOC
 
 include $(TOP)/configure/RULES_TOP
 
