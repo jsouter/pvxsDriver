@@ -18,6 +18,8 @@
 #include <epicsExport.h>
 #include "pvxsDriver.h"
 
+#include <iostream>
+
 //#define DEFAULT_REQUEST "record[queueSize=100]field()"
 #define DEFAULT_REQUEST "field()"
 
@@ -50,7 +52,8 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
     : ADDriver(portName, 1, NUM_PVA_DRIVER_PARAMS, maxBuffers, maxMemory, 0, 0, ASYN_CANBLOCK, 1,
             priority, stackSize),
       m_pvName(pvName),
-      m_thisPtr(shared_ptr<pvxsDriver>(this))
+      m_thisPtr(shared_ptr<pvxsDriver>(this)),
+      m_ctxt(pvxs::client::Config::from_env().build())
 {
     int status = asynSuccess;
     char versionString[20];
@@ -126,6 +129,19 @@ asynStatus pvxsDriver::writeInt32(asynUser *pasynUser, epicsInt32 value)
     if (function == ADAcquire){
         if (value == 1){
             setIntegerParam(ADNumImagesCounter, 0);
+            auto result = m_ctxt.get(m_pvName).exec()->wait();
+            if (!m_value.valid()) {
+                // TODO, maybe there are other situations where we would need to
+                // make a new converter
+                m_value = pvxs::Value(result);
+                m_converter = std::make_shared<NTNDArrayConverterPvxs>(m_value);
+            } else {
+                m_value.assign(result);
+            }
+            auto info = m_converter->getInfo();
+            NDArray *pImage = pNDArrayPool->alloc(info.ndims, (size_t*) &info.dims, info.dataType, info.totalBytes, NULL);
+            m_converter->toArray(pImage);
+            std::cout << pImage->uniqueId << std::endl;
             return asynError;
             // m_monitor->start();
         }
