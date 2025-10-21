@@ -103,37 +103,6 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
     unlock();
 }
 
-// int exampleArg = 100;
-// auto whatever = (void*) &exampleArg;
-
-// void myDummyThread(void *arg) {
-//     // this does work, how do we make sure it has access to the right member variables?
-//     // I guess we just need some sort of thread safe shared pointer to the converter??? man I am stupid
-
-//     // auto myArg = reinterpret_cast<int>(*arg);
-//     int myArg = *(int*) arg; // this is so ugly but I guess it's the basic idea of what you're supposed to do here
-//     // you could cast a struct or something
-
-//     while(1) {
-//         std::cout << "test" << myArg << std::endl;
-//         epicsThreadSleep(2.0);
-//     }
-// }
-
-// // https://epics.anl.gov/base/R7-0/6-docs/doxygen/epics_thread_8h.html
-// void pvxsDriver::startSubscriptionThread(void) {
-//     // is this the way to do it? i have no idea lol
-//     // NDPluginDriver inherits from epicsThreadRunable
-//     auto my_id = epicsThreadCreate(
-//         "myCoolThread",
-//         0, //priority i have no idea
-//         1000, // stack size idk either lol
-//         myDummyThread, // fn ptr,
-//         whatever
-//     );
-
-//     std::cout << "got id " << my_id << std::endl;
-// }
 void subscriptionThread(void *argPtr) {
     // TODO, we need to make a struct that has all the info we need for the thread...
     // then how do we pass this info back up to the main thread...
@@ -141,7 +110,6 @@ void subscriptionThread(void *argPtr) {
     // maybe we need a pointer to a m_value or something to update...
     auto *driver = (pvxsDriver*) argPtr;
     // it would be nicer to have a smart pointer than a dumb one..
-    std::cout << driver << std::endl;
 
     // is there any reason we need the context to exist outside of this thread??
     pvxs::MPMCFIFO<std::shared_ptr<pvxs::client::Subscription>> workqueue(42u);
@@ -296,10 +264,6 @@ asynStatus pvxsDriver::connectPv(std::string const & pvName)
         subscriptionThread, // fn ptr,
         (void*) this
     );
-
-    // epicsThreadSleep(1000);
-
-    
 
     return asynError;
 }
