@@ -13,9 +13,7 @@
 
 class pvxsDriver;
 
-typedef std::shared_ptr<pvxsDriver> pvxsDriverPtr;
-
-class epicsShareClass pvxsDriver : public ADDriver
+class epicsShareClass pvxsDriver : public ADDriver, std::enable_shared_from_this<pvxsDriver>
 {
 
 public:
@@ -26,6 +24,9 @@ public:
     asynStatus writeInt32(asynUser *pasynUser, epicsInt32 value);
     asynStatus writeOctet(asynUser *pasynUser, const char *value, size_t nChars, size_t *nActual);
     virtual void report (FILE *fp, int details);
+    std::shared_ptr<pvxsDriver> getPtr() {
+        return shared_from_this();
+    };
 
 protected:
     int PVAOverrunCounter;
@@ -36,7 +37,6 @@ protected:
 
 private:
     std::string m_pvName;
-    pvxsDriverPtr m_thisPtr;
     asynStatus connectPv(std::string const & pvName);
     pvxs::client::Context m_ctxt;
     pvxs::Value m_value;

@@ -52,7 +52,6 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
     : ADDriver(portName, 1, NUM_PVA_DRIVER_PARAMS, maxBuffers, maxMemory, 0, 0, ASYN_CANBLOCK, 1,
             priority, stackSize),
       m_pvName(pvName),
-      m_thisPtr(shared_ptr<pvxsDriver>(this)),
       m_ctxt(pvxs::client::Config::from_env().build())
 {
     int status = asynSuccess;
