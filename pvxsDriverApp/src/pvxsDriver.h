@@ -29,11 +29,8 @@ public:
         std::cout << "shared from this???\n";
         return this->shared_from_this();
     };
-    std::string m_pvName;
-    pvxs::Value m_value;
-    pvxs::client::Context m_ctxt;
 
-
+    void updatePVsFromConverter(void);
     
     protected:
     int PVAOverrunCounter;
@@ -46,6 +43,11 @@ public:
     asynStatus connectPv(std::string const & pvName);
     NTNDArrayConverterPvxsPtr m_converter;
     epicsThreadId m_subscriptionThreadId;
+    std::string m_pvName;
+    pvxs::Value m_value;
+    pvxs::client::Context m_ctxt;
+
+    friend void subscriptionThread(void *argPtr);
 };
 
 #define NUM_PVA_DRIVER_PARAMS ((int)(&LAST_PVA_DRIVER_PARAM - &FIRST_PVA_DRIVER_PARAM + 1))

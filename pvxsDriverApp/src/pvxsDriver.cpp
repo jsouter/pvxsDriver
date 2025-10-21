@@ -156,10 +156,15 @@ void subscriptionThread(void *argPtr) {
 
     while(auto sub = workqueue.pop()) { // could workqueue.push(nullptr) to break
         try {
+            // TODO, add in some mutexes
             pvxs::Value update = sub->pop();
-            std::cout << "good!\n";
             if(!update)
                 continue; // Subscription queue empty, wait for another event callback
+            if (!driver->m_value.valid()) {
+                driver->m_value = update;
+                driver->m_converter = std::make_shared<NTNDArrayConverterPvxs>(driver->m_value);
+            } driver->m_value.assign(update);
+            driver->updatePVsFromConverter();
         } catch(std::exception& e) {
             // may be Connected(), Disconnect(), Finished(), or RemoteError()
             std::cerr<<"Error "<<e.what()<<"\n";
@@ -167,6 +172,118 @@ void subscriptionThread(void *argPtr) {
         // queue not empty, reschedule
         workqueue.push(sub);
     }
+}
+
+void pvxsDriver::updatePVsFromConverter(void) {
+    // TODO, check if anything from monitorEvent is missing
+    // also, be more careful about when we call lock and unlock...
+    int acquire;
+    getIntegerParam(ADAcquire, &acquire);
+    if (acquire == 0) {
+        // monitor->release(update);
+        return;
+    }
+    const char *functionName = "updatePVsFromConverter";
+    NTNDArrayInfo_t info;
+
+    try
+    {
+        info = m_converter->getInfo();
+    }
+    catch(exception& e)
+    {
+        asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
+                "%s::%s failed to get info from NTNDArray: %s\n",
+                driverName, functionName, e.what());
+        // monitor->release(update);
+        // continue;
+    }
+
+    NDArray *pImage = pNDArrayPool->alloc(info.ndims, (size_t*) &info.dims,
+        info.dataType, info.totalBytes, NULL);
+
+    if(!pImage)
+    {
+        asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
+                "%s::%s failed to alloc new NDArray"
+                " - memory pool exhausted? (free: %d)\n",
+                driverName, functionName, pNDArrayPool->getNumFree());
+        // monitor->release(update);
+        // continue;
+    }
+
+    // unlock();
+    try
+    {
+        asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+                    "%s::%s Converting to NDArray\n",
+                    driverName, functionName);
+        m_converter->toArray(pImage);
+    }
+    catch(exception& e)
+    {
+        asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
+                "%s::%s failed to convert NTNDArray into NDArray: %s\n",
+                driverName, functionName, e.what());
+        pImage->release();
+        // monitor->release(update);
+        // lock();
+        // continue;
+    }
+    // lock();
+
+    int xSize     = pImage->dims[info.x.dim].size;
+    int ySize     = pImage->dims[info.y.dim].size;
+    setIntegerParam(ADMaxSizeX,   xSize);
+    setIntegerParam(ADMaxSizeY,   ySize);
+    setIntegerParam(ADSizeX,      xSize);
+    setIntegerParam(ADSizeY,      ySize);
+    setIntegerParam(NDArraySizeX, xSize);
+    setIntegerParam(NDArraySizeY, ySize);
+    setIntegerParam(NDArraySizeZ, pImage->dims[info.color.dim].size);
+    setIntegerParam(ADMinX,       pImage->dims[info.x.dim].offset);
+    setIntegerParam(ADMinY,       pImage->dims[info.y.dim].offset);
+    setIntegerParam(ADBinX,       pImage->dims[info.x.dim].binning);
+    setIntegerParam(ADBinY,       pImage->dims[info.y.dim].binning);
+    setIntegerParam(ADReverseX,   pImage->dims[info.x.dim].reverse);
+    setIntegerParam(ADReverseY,   pImage->dims[info.y.dim].reverse);
+    setIntegerParam(NDArraySize,  (int) info.totalBytes);
+    setIntegerParam(NDDataType,   (int) info.dataType);
+    setIntegerParam(NDColorMode,  (int) info.colorMode);
+    callParamCallbacks();
+
+    int arrayCallbacks;
+    getIntegerParam(NDArrayCallbacks, &arrayCallbacks);
+    if(arrayCallbacks)
+    {
+    asynPrint(pasynUserSelf, ASYN_TRACE_FLOW,
+                "%s::%s Callback with NDArray (%p)\n",
+                driverName, functionName, pImage);
+    doCallbacksGenericPointer(pImage, NDArrayData, 0);
+    }
+
+    // Update the counters after doCallbacksGenericPointer()
+    int imageCounter;
+    int arrayCounter;
+    int imageMode;
+    int numImages;
+    getIntegerParam(NDArrayCounter, &arrayCounter);
+    setIntegerParam(NDArrayCounter, arrayCounter+1);
+    getIntegerParam(ADNumImagesCounter, &imageCounter);
+    imageCounter++;
+    setIntegerParam(ADNumImagesCounter, imageCounter);
+
+    // See if acquisition should stop
+    getIntegerParam(ADImageMode, &imageMode);
+    if (imageMode == ADImageMultiple) {
+    getIntegerParam(ADNumImages, &numImages);
+    if (imageCounter >= numImages) setIntegerParam(ADAcquire, 0);
+    }    
+    if (imageMode == ADImageSingle) setIntegerParam(ADAcquire, 0);
+    callParamCallbacks();
+
+    pImage->release();
+    // monitor->release(update);
 }
 
 asynStatus pvxsDriver::connectPv(std::string const & pvName)
@@ -205,28 +322,7 @@ asynStatus pvxsDriver::writeInt32(asynUser *pasynUser, epicsInt32 value)
     status = (asynStatus) setIntegerParam(function, value);
 
     if (function == ADAcquire){
-        if (value == 1){
-            setIntegerParam(ADNumImagesCounter, 0);
-            // auto result = m_ctxt.get(m_pvName).exec()->wait();
-            // if (!m_value.valid()) {
-            //     // TODO, maybe there are other situations where we would need to
-            //     // make a new converter
-            //     m_value = pvxs::Value(result);
-            //     m_converter = std::make_shared<NTNDArrayConverterPvxs>(m_value);
-            // } else {
-            //     m_value.assign(result);
-            // }
-            // auto info = m_converter->getInfo();
-            // NDArray *pImage = pNDArrayPool->alloc(info.ndims, (size_t*) &info.dims, info.dataType, info.totalBytes, NULL);
-            // m_converter->toArray(pImage);
-            // std::cout << pImage->uniqueId << std::endl;
-            return asynError;
-            // m_monitor->start();
-        }
-        else {
-            return asynError;
-            // m_monitor->stop();
-        }
+        if (value == 1) setIntegerParam(ADNumImagesCounter, 0);
     } else {
         // If this parameter belongs to a base class call its method
         if (function < FIRST_PVA_DRIVER_PARAM)
