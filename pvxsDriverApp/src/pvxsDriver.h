@@ -11,6 +11,12 @@
 #define DRIVER_REVISION     6
 #define DRIVER_MODIFICATION 0
 
+struct SubThreadArgs {
+    char pvName[256];
+    std::shared_ptr<pvxs::Value>;
+    // pvxs::client::Context context;
+};
+
 class pvxsDriver;
 
 class epicsShareClass pvxsDriver : public ADDriver, std::enable_shared_from_this<pvxsDriver>
@@ -28,19 +34,25 @@ public:
         return shared_from_this();
     };
 
-protected:
+
+    
+    protected:
     int PVAOverrunCounter;
     #define FIRST_PVA_DRIVER_PARAM PVAOverrunCounter   
     int PVAPvName;
     int PVAPvConnectionStatus;
     #define LAST_PVA_DRIVER_PARAM PVAPvConnectionStatus   
-
-private:
+    
+    private:
     std::string m_pvName;
     asynStatus connectPv(std::string const & pvName);
     pvxs::client::Context m_ctxt;
     pvxs::Value m_value;
     NTNDArrayConverterPvxsPtr m_converter;
+    epicsThreadId m_subscriptionThreadId;
+    // pvxs::MPMCFIFO<std::shared_ptr<pvxs::client::Subscription>> workqueue;
+    void *m_workqueueVoidPtr;  // need void pointer for epicsThread, TODO: this is pretty ugly, rework
+    SubThreadArgs m_args;
 };
 
 #define NUM_PVA_DRIVER_PARAMS ((int)(&LAST_PVA_DRIVER_PARAM - &FIRST_PVA_DRIVER_PARAM + 1))

@@ -17,7 +17,7 @@
 
 #include <epicsExport.h>
 #include "pvxsDriver.h"
-
+#include <cstring>
 #include <iostream>
 
 //#define DEFAULT_REQUEST "record[queueSize=100]field()"
@@ -103,8 +103,87 @@ pvxsDriver::pvxsDriver (const char *portName, const char *pvName,
     unlock();
 }
 
+// int exampleArg = 100;
+// auto whatever = (void*) &exampleArg;
+
+// void myDummyThread(void *arg) {
+//     // this does work, how do we make sure it has access to the right member variables?
+//     // I guess we just need some sort of thread safe shared pointer to the converter??? man I am stupid
+
+//     // auto myArg = reinterpret_cast<int>(*arg);
+//     int myArg = *(int*) arg; // this is so ugly but I guess it's the basic idea of what you're supposed to do here
+//     // you could cast a struct or something
+
+//     while(1) {
+//         std::cout << "test" << myArg << std::endl;
+//         epicsThreadSleep(2.0);
+//     }
+// }
+
+// // https://epics.anl.gov/base/R7-0/6-docs/doxygen/epics_thread_8h.html
+// void pvxsDriver::startSubscriptionThread(void) {
+//     // is this the way to do it? i have no idea lol
+//     // NDPluginDriver inherits from epicsThreadRunable
+//     auto my_id = epicsThreadCreate(
+//         "myCoolThread",
+//         0, //priority i have no idea
+//         1000, // stack size idk either lol
+//         myDummyThread, // fn ptr,
+//         whatever
+//     );
+
+//     std::cout << "got id " << my_id << std::endl;
+// }
+void subscriptionThread(void *argPtr) {
+    // TODO, we need to make a struct that has all the info we need for the thread...
+    // then how do we pass this info back up to the main thread...
+    // std::string const pvName = * (std::string*) args;
+    // maybe we need a pointer to a m_value or something to update...
+    SubThreadArgs args = *(struct SubThreadArgs*) argPtr; // this throws a bad alloc
+    // is there any reason we need the context to exist outside of this thread??
+    auto context = pvxs::client::Config::from_env().build();
+    pvxs::MPMCFIFO<std::shared_ptr<pvxs::client::Subscription>> workqueue(42u);
+    auto sub = context.monitor(args.pvName)
+                .event([&workqueue](pvxs::client::Subscription& sub) {
+                    // Subscription queue becomes not empty.
+                    // Avoid I/O on PVXS worker thread,
+                    // delegate to application thread
+                    workqueue.push(sub.shared_from_this());
+                })
+                .exec();
+
+    while(auto sub = workqueue.pop()) { // could workqueue.push(nullptr) to break
+        try {
+            pvxs::Value update = sub->pop();
+            if(!update)
+                continue; // Subscription queue empty, wait for another event callback
+        } catch(std::exception& e) {
+            // may be Connected(), Disconnect(), Finished(), or RemoteError()
+            std::cerr<<"Error "<<e.what()<<"\n";
+        }
+        // queue not empty, reschedule
+        workqueue.push(sub);
+    }
+}
+
 asynStatus pvxsDriver::connectPv(std::string const & pvName)
 {
+    strncpy(m_args.pvName, pvName.c_str(), pvName.length());
+    // m_args is bad as when it is updated it is also updated in the sub thread???
+
+    m_subscriptionThreadId = epicsThreadCreate(
+        "subscriptionPopThread",
+        0, //priority i have no idea
+        0,
+        // 1000, // stack size idk either lol.. invalid argument
+        subscriptionThread, // fn ptr,
+        (void*) &m_args
+    );
+
+    // epicsThreadSleep(1000);
+
+    
+
     return asynError;
 }
 
@@ -128,19 +207,19 @@ asynStatus pvxsDriver::writeInt32(asynUser *pasynUser, epicsInt32 value)
     if (function == ADAcquire){
         if (value == 1){
             setIntegerParam(ADNumImagesCounter, 0);
-            auto result = m_ctxt.get(m_pvName).exec()->wait();
-            if (!m_value.valid()) {
-                // TODO, maybe there are other situations where we would need to
-                // make a new converter
-                m_value = pvxs::Value(result);
-                m_converter = std::make_shared<NTNDArrayConverterPvxs>(m_value);
-            } else {
-                m_value.assign(result);
-            }
-            auto info = m_converter->getInfo();
-            NDArray *pImage = pNDArrayPool->alloc(info.ndims, (size_t*) &info.dims, info.dataType, info.totalBytes, NULL);
-            m_converter->toArray(pImage);
-            std::cout << pImage->uniqueId << std::endl;
+            // auto result = m_ctxt.get(m_pvName).exec()->wait();
+            // if (!m_value.valid()) {
+            //     // TODO, maybe there are other situations where we would need to
+            //     // make a new converter
+            //     m_value = pvxs::Value(result);
+            //     m_converter = std::make_shared<NTNDArrayConverterPvxs>(m_value);
+            // } else {
+            //     m_value.assign(result);
+            // }
+            // auto info = m_converter->getInfo();
+            // NDArray *pImage = pNDArrayPool->alloc(info.ndims, (size_t*) &info.dims, info.dataType, info.totalBytes, NULL);
+            // m_converter->toArray(pImage);
+            // std::cout << pImage->uniqueId << std::endl;
             return asynError;
             // m_monitor->start();
         }
@@ -185,8 +264,8 @@ asynStatus pvxsDriver::writeOctet(asynUser *pasynUser, const char *value, size_t
     status = (asynStatus)setStringParam(function, (char *)value);
 
     if (function == PVAPvName){
-        if((status = connectPv(value)))
-            status = (asynStatus)setStringParam(function, m_pvName);
+        // if((status = connectPv(value)))
+        //     status = (asynStatus)setStringParam(function, m_pvName);
     }
     else if (function < FIRST_PVA_DRIVER_PARAM) {
         /* If this parameter belongs to a base class call its method */
