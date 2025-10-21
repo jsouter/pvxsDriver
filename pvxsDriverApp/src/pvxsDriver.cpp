@@ -139,11 +139,13 @@ void subscriptionThread(void *argPtr) {
     // then how do we pass this info back up to the main thread...
     // std::string const pvName = * (std::string*) args;
     // maybe we need a pointer to a m_value or something to update...
-    SubThreadArgs args = *(struct SubThreadArgs*) argPtr; // this throws a bad alloc
+    auto *driver = (pvxsDriver*) argPtr;
+    // it would be nicer to have a smart pointer than a dumb one..
+    std::cout << driver << std::endl;
+
     // is there any reason we need the context to exist outside of this thread??
-    auto context = pvxs::client::Config::from_env().build();
     pvxs::MPMCFIFO<std::shared_ptr<pvxs::client::Subscription>> workqueue(42u);
-    auto sub = context.monitor(args.pvName)
+    auto sub = driver->m_ctxt.monitor(driver->m_pvName)
                 .event([&workqueue](pvxs::client::Subscription& sub) {
                     // Subscription queue becomes not empty.
                     // Avoid I/O on PVXS worker thread,
@@ -155,6 +157,7 @@ void subscriptionThread(void *argPtr) {
     while(auto sub = workqueue.pop()) { // could workqueue.push(nullptr) to break
         try {
             pvxs::Value update = sub->pop();
+            std::cout << "good!\n";
             if(!update)
                 continue; // Subscription queue empty, wait for another event callback
         } catch(std::exception& e) {
@@ -168,16 +171,13 @@ void subscriptionThread(void *argPtr) {
 
 asynStatus pvxsDriver::connectPv(std::string const & pvName)
 {
-    strncpy(m_args.pvName, pvName.c_str(), pvName.length());
-    // m_args is bad as when it is updated it is also updated in the sub thread???
-
     m_subscriptionThreadId = epicsThreadCreate(
         "subscriptionPopThread",
         0, //priority i have no idea
         0,
         // 1000, // stack size idk either lol.. invalid argument
         subscriptionThread, // fn ptr,
-        (void*) &m_args
+        (void*) this
     );
 
     // epicsThreadSleep(1000);
