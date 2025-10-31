@@ -252,10 +252,9 @@ asynStatus pvxsDriver::connectPv(std::string const & pvName)
 {
     m_subscriptionThreadId = epicsThreadCreate(
         "subscriptionPopThread",
-        0, //priority i have no idea
-        0,
-        // 1000, // stack size idk either lol.. invalid argument
-        subscriptionThread, // fn ptr,
+        epicsThreadPriorityMedium,
+        epicsThreadStackMedium,
+        subscriptionThread,
         (void*) this
     );
 
