@@ -148,7 +148,6 @@ void pvxsDriver::updatePVsFromConverter(void) {
     int acquire;
     getIntegerParam(ADAcquire, &acquire);
     if (acquire == 0) {
-        // monitor->release(update);
         return;
     }
     const char *functionName = "updatePVsFromConverter";
@@ -163,8 +162,7 @@ void pvxsDriver::updatePVsFromConverter(void) {
         asynPrint(pasynUserSelf, ASYN_TRACE_ERROR,
                 "%s::%s failed to get info from NTNDArray: %s\n",
                 driverName, functionName, e.what());
-        // monitor->release(update);
-        // continue;
+        return;
     }
 
     NDArray *pImage = pNDArrayPool->alloc(info.ndims, (size_t*) &info.dims,
@@ -176,8 +174,7 @@ void pvxsDriver::updatePVsFromConverter(void) {
                 "%s::%s failed to alloc new NDArray"
                 " - memory pool exhausted? (free: %d)\n",
                 driverName, functionName, pNDArrayPool->getNumFree());
-        // monitor->release(update);
-        // continue;
+        return;
     }
 
     // unlock();
@@ -194,9 +191,7 @@ void pvxsDriver::updatePVsFromConverter(void) {
                 "%s::%s failed to convert NTNDArray into NDArray: %s\n",
                 driverName, functionName, e.what());
         pImage->release();
-        // monitor->release(update);
-        // lock();
-        // continue;
+        return;
     }
     // lock();
 
@@ -251,7 +246,6 @@ void pvxsDriver::updatePVsFromConverter(void) {
     callParamCallbacks();
 
     pImage->release();
-    // monitor->release(update);
 }
 
 asynStatus pvxsDriver::connectPv(std::string const & pvName)
