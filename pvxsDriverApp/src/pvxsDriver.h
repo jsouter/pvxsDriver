@@ -14,7 +14,7 @@
 
 class pvxsDriver;
 
-class epicsShareClass pvxsDriver : public ADDriver, public std::enable_shared_from_this<pvxsDriver>
+class epicsShareClass pvxsDriver : public ADDriver
 {
 
 public:
@@ -25,14 +25,6 @@ public:
     asynStatus writeInt32(asynUser *pasynUser, epicsInt32 value);
     asynStatus writeOctet(asynUser *pasynUser, const char *value, size_t nChars, size_t *nActual);
     virtual void report (FILE *fp, int details);
-    std::shared_ptr<pvxsDriver> getPtr() {
-        std::cout << "shared from this???\n";
-        // AHHH i forgot this only works when there is already a shared_ptr to the object
-        // meaning the class has to be created inside a shared_ptr...
-        // could we just pass a member variable as the function pointer to epicsThreadCreate
-        // to avoid having to explicitly cast and point in a raw pointer at all? I don't know...
-        return this->shared_from_this();
-    };
 
     void updatePVsFromConverter(void);
     
